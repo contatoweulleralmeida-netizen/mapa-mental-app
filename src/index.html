@@ -1,0 +1,2033 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modelo Operacional - Mapa Mental</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' };</script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Prevent default page scrolling on whole document */
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    /* Infinite Canvas Background */
+    .bg-grid-pattern {
+      background-size: 30px 30px;
+      background-image: radial-gradient(circle, rgba(148, 163, 184, 0.25) 1.5px, transparent 1.5px);
+    }
+
+    .dark .bg-grid-pattern {
+      background-image: radial-gradient(circle, rgba(71, 85, 105, 0.4) 1.5px, transparent 1.5px);
+    }
+
+    /* Container for Pan & Zoom */
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10000px;
+      height: 10000px;
+      transform-origin: 0 0;
+      pointer-events: none;
+    }
+
+    /* SVG Overlay covering the entire virtual workspace */
+    #svg-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10000px;
+      height: 10000px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Dynamic Node Layer */
+    #nodes-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10000px;
+      height: 10000px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Área invisível usada só para medir o tamanho real dos nós */
+    #measure-container {
+      position: fixed;
+      left: -50000px;
+      top: 0;
+      width: 40000px;
+      height: 1px;
+      visibility: hidden;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /* Mind Map Individual Node
+       (o tamanho vem deste CSS, não do Tailwind, para a medição ser sempre exata) */
+    .mindmap-node {
+      position: absolute;
+      pointer-events: auto;
+      user-select: none;
+      touch-action: none;
+      transition: box-shadow 0.15s ease, border-color 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid;
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 500;
+      min-width: 100px;
+      max-width: 320px;
+      cursor: grab;
+      box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+    }
+
+    .mindmap-node:active {
+      cursor: grabbing;
+    }
+
+    .mindmap-node .node-emoji {
+      font-size: 16px;
+      line-height: 24px;
+      margin-right: 4px;
+      flex-shrink: 0;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .mindmap-node.selected {
+      outline: 2px solid #9933CC;
+      outline-offset: 3px;
+      box-shadow: 0 8px 20px -4px rgba(102, 0, 153, 0.4);
+    }
+
+    .mindmap-node.drop-target {
+      outline: 3px dashed #10b981 !important;
+      outline-offset: 4px;
+      transform: scale(1.05);
+    }
+
+    /* Botão (−)/(+) para minimizar/expandir cada ramo */
+    .collapse-btn {
+      position: absolute;
+      right: -14px;
+      top: 50%;
+      transform: translateY(-50%);
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      border-radius: 10px;
+      border: 2px solid currentColor;
+      background: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      z-index: 3;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+
+    .mindmap-node:hover .collapse-btn,
+    .mindmap-node.selected .collapse-btn,
+    .collapse-btn.is-collapsed {
+      opacity: 1;
+    }
+
+    .collapse-btn:hover {
+      transform: translateY(-50%) scale(1.15);
+    }
+
+    /* Na visão vertical o botão fica embaixo do nó, centralizado */
+    .collapse-btn.vertical {
+      right: auto;
+      left: 50%;
+      top: auto;
+      bottom: -14px;
+      transform: translateX(-50%);
+    }
+
+    .collapse-btn.vertical:hover {
+      transform: translateX(-50%) scale(1.15);
+    }
+
+    /* Inline editable element styling */
+    .node-text {
+      outline: none;
+      word-break: break-word;
+      display: inline-block;
+      min-width: 20px;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    .node-text[contenteditable="true"] {
+      cursor: text;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .node-text.editing {
+      background: rgba(0, 0, 0, 0.1);
+      box-shadow: 0 0 0 2px #9933CC;
+    }
+
+    /* Bolinhas da paleta (atalho de cores no inspetor) */
+    .palette-swatch {
+      border-radius: 9999px;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      padding: 0;
+      transition: transform 0.1s ease;
+    }
+    .palette-swatch:hover { transform: scale(1.15); }
+    .palette-swatch.active { box-shadow: 0 0 0 2px #660099; }
+    .dark .palette-swatch { border-color: #1e293b; }
+    .dark .palette-swatch.active { box-shadow: 0 0 0 2px #ff96b2; }
+
+    /* Clean Scrollbars */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    input[type="color"]::-webkit-color-swatch-wrapper {
+      padding: 0;
+    }
+    input[type="color"]::-webkit-color-swatch {
+      border: none;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-100 flex flex-col">
+
+  <!-- TOP NAVBAR TOOLBAR -->
+  <header class="h-14 bg-white/95 dark:bg-slate-800/95 backdrop-blur border-b border-slate-200 dark:border-slate-700 px-4 flex items-center justify-between z-30 shrink-0">
+    <!-- Brand / Title -->
+    <div class="flex items-center space-x-3">
+      <div class="bg-[#660099] text-white p-2 rounded-xl flex items-center justify-center shadow-md shadow-[#660099]/20">
+        <i class="fa-solid fa-sitemap text-lg"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-sm leading-tight text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700/60 px-1.5 py-0.5 rounded cursor-pointer transition flex items-center group" id="map-title-display" title="Clique duas vezes para renomear">
+          <span id="map-title-text">Mapa Mental Principal</span>
+          <i class="fa-solid fa-pen text-[10px] text-slate-400 group-hover:inline ml-1.5 hidden"></i>
+        </h1>
+        <p class="text-[10px] text-slate-500 dark:text-slate-400">Modelo Operacional - Mapa Mental</p>
+      </div>
+    </div>
+
+    <!-- Actions Toolbar -->
+    <div class="flex items-center space-x-1 bg-slate-100 dark:bg-slate-700/50 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+      <button id="btn-add-child" title="Adicionar Filho (Tab)" class="px-3 py-1.5 hover:bg-white dark:hover:bg-slate-600 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition text-slate-700 dark:text-slate-200 shadow-sm">
+        <i class="fa-solid fa-plus text-[#9933CC]"></i>
+        <span class="hidden sm:inline">Filho</span>
+        <kbd class="text-[9px] bg-slate-200 dark:bg-slate-700 px-1 rounded text-slate-500 dark:text-slate-400">Tab</kbd>
+      </button>
+      <button id="btn-add-sibling" title="Adicionar Irmão (Enter)" class="px-3 py-1.5 hover:bg-white dark:hover:bg-slate-600 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition text-slate-700 dark:text-slate-200 shadow-sm">
+        <i class="fa-solid fa-turn-down rotate-90 text-emerald-500"></i>
+        <span class="hidden sm:inline">Irmão</span>
+        <kbd class="text-[9px] bg-slate-200 dark:bg-slate-700 px-1 rounded text-slate-500 dark:text-slate-400">Enter</kbd>
+      </button>
+      <div class="h-4 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
+      <button id="btn-delete-node" title="Excluir Nó (Delete)" class="px-3 py-1.5 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 flex items-center space-x-1 transition">
+        <i class="fa-solid fa-trash-can"></i>
+        <span class="hidden sm:inline">Excluir</span>
+      </button>
+      <div class="h-4 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
+      <button id="btn-undo" title="Desfazer (Ctrl+Z)" class="px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-600 rounded-lg text-xs text-slate-700 dark:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed">
+        <i class="fa-solid fa-rotate-left"></i>
+      </button>
+      <button id="btn-redo" title="Refazer (Ctrl+Y)" class="px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-600 rounded-lg text-xs text-slate-700 dark:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed">
+        <i class="fa-solid fa-rotate-right"></i>
+      </button>
+      <div class="h-4 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
+      <button id="btn-layout-auto" title="Auto-Organizar Diagrama" class="px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-600 rounded-lg text-xs text-slate-700 dark:text-slate-200 transition">
+        <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i>
+        <span class="hidden md:inline ml-1">Auto Layout</span>
+      </button>
+    </div>
+
+    <!-- File Operations & Theme Toggle -->
+    <div class="flex items-center space-x-2">
+      <input type="file" id="file-input" accept=".json" class="hidden" />
+
+      <button id="btn-new-map" title="Novo Mapa" class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition">
+        <i class="fa-solid fa-file-circle-plus"></i>
+      </button>
+
+      <button id="btn-open-file" title="Abrir Arquivo (.json)" class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition">
+        <i class="fa-solid fa-folder-open"></i>
+      </button>
+
+      <!-- Save & Export Menu -->
+      <div class="relative group">
+        <button id="btn-export-menu" class="px-3 py-1.5 bg-[#660099] hover:bg-[#520079] text-white rounded-lg text-xs font-medium flex items-center space-x-1.5 shadow-sm transition">
+          <i class="fa-solid fa-download"></i>
+          <span>Salvar / Exportar</span>
+          <i class="fa-solid fa-chevron-down text-[10px]"></i>
+        </button>
+
+        <div class="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 hidden group-hover:block hover:block py-1 z-50">
+          <button id="btn-save-json" class="w-full px-4 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center space-x-2 text-slate-700 dark:text-slate-200">
+            <i class="fa-solid fa-file-code text-[#9933CC]"></i>
+            <span>Salvar em JSON (.json)</span>
+          </button>
+          <button id="btn-export-png" class="w-full px-4 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center space-x-2 text-slate-700 dark:text-slate-200">
+            <i class="fa-solid fa-file-image text-emerald-500"></i>
+            <span>Exportar Imagem PNG</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Orientação: horizontal / vertical -->
+      <button id="btn-orientation-toggle" title="Visão horizontal (clique para vertical)" class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition">
+        <i id="orientation-icon" class="fa-solid fa-sitemap fa-rotate-270"></i>
+      </button>
+
+      <!-- Theme Switcher -->
+      <button id="btn-theme-toggle" title="Alternar Modo Claro/Escuro" class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition">
+        <i class="fa-solid fa-moon dark:hidden"></i>
+        <i class="fa-solid fa-sun hidden dark:inline text-amber-400"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <div class="flex-1 relative flex overflow-hidden">
+
+    <!-- CANVAS VIEWPORT -->
+    <div id="viewport" class="flex-1 h-full relative overflow-hidden bg-slate-50 dark:bg-slate-900 bg-grid-pattern cursor-grab active:cursor-grabbing">
+
+      <!-- Interactive Pan/Zoom Layer -->
+      <div id="canvas-container">
+        <!-- Lines Connections -->
+        <svg id="svg-canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+        <!-- Nodes -->
+        <div id="nodes-container"></div>
+      </div>
+
+      <!-- CANVAS ZOOM & FIT CONTROLS -->
+      <div class="absolute bottom-6 left-6 z-20 flex items-center space-x-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-lg text-slate-700 dark:text-slate-200">
+        <button id="btn-zoom-out" title="Reduzir Zoom" class="w-8 h-8 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center transition">
+          <i class="fa-solid fa-minus text-xs"></i>
+        </button>
+        <span id="zoom-level-text" class="text-xs font-semibold px-2 min-w-[50px] text-center">100%</span>
+        <button id="btn-zoom-in" title="Aumentar Zoom" class="w-8 h-8 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center transition">
+          <i class="fa-solid fa-plus text-xs"></i>
+        </button>
+        <div class="h-4 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
+        <button id="btn-fit-screen" title="Centralizar e Enquadrar Mapa" class="w-8 h-8 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center transition">
+          <i class="fa-solid fa-compress text-xs"></i>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- RIGHT STYLE INSPECTOR PANEL -->
+    <aside id="inspector-panel" class="w-72 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 flex flex-col z-20 shrink-0">
+
+      <div class="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Inspetor de Estilos</h2>
+        <span id="selected-node-indicator" class="text-[10px] bg-[#f3e6f9] text-[#660099] dark:bg-[#660099]/30 dark:text-[#d9b3ec] font-semibold px-2 py-0.5 rounded-full">Nó Selecionado</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-6 text-sm no-scrollbar">
+
+        <!-- Combinações prontas (somente cores da paleta) -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Combinações da Paleta</label>
+          <div class="grid grid-cols-5 gap-2">
+            <button class="theme-preset h-7 rounded-lg border border-transparent focus:ring-2 focus:ring-[#660099]" style="background: linear-gradient(90deg, #660099 50%, #eb3c7d 50%);" data-theme="padrao" title="Padrão: roxo e rosa"></button>
+            <button class="theme-preset h-7 rounded-lg border border-transparent focus:ring-2 focus:ring-[#660099]" style="background: linear-gradient(90deg, #380054 50%, #660099 50%);" data-theme="roxo" title="Roxo"></button>
+            <button class="theme-preset h-7 rounded-lg border border-transparent focus:ring-2 focus:ring-[#660099]" style="background: linear-gradient(90deg, #eb3c7d 50%, #ff96b2 50%);" data-theme="rosa" title="Rosa"></button>
+            <button class="theme-preset h-7 rounded-lg border border-transparent focus:ring-2 focus:ring-[#660099]" style="background: linear-gradient(90deg, #660099 50%, #82d400 50%);" data-theme="verde" title="Verde"></button>
+            <button class="theme-preset h-7 rounded-lg border border-transparent focus:ring-2 focus:ring-[#660099]" style="background: linear-gradient(90deg, #660099 50%, #ff9900 50%);" data-theme="laranja" title="Laranja"></button>
+          </div>
+        </div>
+
+        <hr class="border-slate-200 dark:border-slate-700" />
+
+        <!-- Line Style Connections -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Estilo das Linhas</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button id="line-curved" class="line-style-btn p-2 text-xs border rounded-lg border-[#660099] bg-[#f5eafa] text-[#660099] dark:bg-[#660099]/25 dark:text-[#d9b3ec] flex flex-col items-center justify-center space-y-1" data-line="curved">
+              <i class="fa-solid fa-bezier-curve"></i>
+              <span class="text-[10px]">Curva</span>
+            </button>
+            <button id="line-straight" class="line-style-btn p-2 text-xs border rounded-lg border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 flex flex-col items-center justify-center space-y-1" data-line="straight">
+              <i class="fa-solid fa-slash"></i>
+              <span class="text-[10px]">Reta</span>
+            </button>
+            <button id="line-orthogonal" class="line-style-btn p-2 text-xs border rounded-lg border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 flex flex-col items-center justify-center space-y-1" data-line="orthogonal">
+              <i class="fa-solid fa-diagram-next"></i>
+              <span class="text-[10px]">Orto</span>
+            </button>
+          </div>
+        </div>
+
+        <hr class="border-slate-200 dark:border-slate-700" />
+
+        <!-- Aparência: vale para todos os nós -->
+        <div class="space-y-4">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Aparência (todos os nós)</h3>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Fundo</label>
+            <div class="flex items-center space-x-2 mb-2">
+              <input type="color" id="node-bg-color" value="#ffffff" class="w-8 h-8 rounded-full border border-slate-300 dark:border-slate-600 cursor-pointer">
+              <span id="node-bg-val" class="text-xs font-mono uppercase text-slate-600 dark:text-slate-300">#ffffff</span>
+            </div>
+            <div class="palette-row flex flex-wrap items-center gap-1.5" data-target="bgColor"></div>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Texto</label>
+            <div class="flex items-center space-x-2 mb-2">
+              <input type="color" id="node-text-color" value="#380054" class="w-8 h-8 rounded-full border border-slate-300 dark:border-slate-600 cursor-pointer">
+              <span id="node-text-val" class="text-xs font-mono uppercase text-slate-600 dark:text-slate-300">#380054</span>
+            </div>
+            <div class="palette-row flex flex-wrap items-center gap-1.5" data-target="textColor"></div>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Cor do Ramo / Conexão</label>
+            <div class="flex items-center space-x-2 mb-2">
+              <input type="color" id="branch-color" value="#eb3c7d" class="w-8 h-8 rounded-full border border-slate-300 dark:border-slate-600 cursor-pointer">
+              <span id="branch-color-val" class="text-xs font-mono uppercase text-slate-600 dark:text-slate-300">#eb3c7d</span>
+            </div>
+            <div class="palette-row flex flex-wrap items-center gap-1.5" data-target="branchColor"></div>
+          </div>
+
+          <!-- Shape Selection (vale para todos os nós) -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Formato dos Nós</label>
+            <select id="node-shape-select" class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-xs p-2 focus:ring-2 focus:ring-[#660099] outline-none text-slate-700 dark:text-slate-200">
+              <option value="rounded">Retângulo Arredondado</option>
+              <option value="pill">Pílula / Cápsula</option>
+              <option value="rectangle">Retângulo Reto</option>
+              <option value="underline">Apenas Sublinhado</option>
+            </select>
+          </div>
+
+          <!-- Icons & Emoji (só o nó selecionado) -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Ícone / Emoji (nó selecionado)</label>
+            <div class="flex flex-wrap gap-1.5 p-2 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-700 rounded-lg" id="emoji-picker">
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="">❌</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="💡">💡</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="🚀">🚀</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="⭐">⭐</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="🎯">🎯</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="🔥">🔥</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="📌">📌</button>
+              <button class="emoji-btn hover:bg-slate-200 dark:hover:bg-slate-600 p-1 rounded text-base" data-emoji="✅">✅</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Medição invisível do tamanho real dos nós -->
+  <div id="measure-container"></div>
+
+  <script>
+    /**
+     * MODELO OPERACIONAL - MAPA MENTAL - Application State & Logic
+     */
+
+    // ---------- Storage seguro (não quebra se localStorage estiver bloqueado) ----------
+    const STORAGE_KEY = 'mindmap_studio_data';
+    function storageGet(key) {
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function storageSet(key, value) {
+      try { localStorage.setItem(key, value); } catch (e) { /* ignora */ }
+    }
+
+    // Campos internos (começam com "_") não são salvos
+    const jsonReplacer = (key, value) => (key.startsWith('_') ? undefined : value);
+
+    // ---------- Paleta de cores ----------
+    const BASE_COLOR = '#660099';       // principal
+    const SECONDARY_COLOR = '#eb3c7d';  // secundária
+    const DEFAULT_TEXT = '#380054';
+
+    const PALETTE = [
+      { hex: '#660099', label: 'Principal', main: true },
+      { hex: '#eb3c7d', label: 'Secundária', main: true },
+      { hex: '#380054' },
+      { hex: '#ff96b2' },
+      { hex: '#cc3d70' },
+      { hex: '#b2d682' },
+      { hex: '#82d400' },
+      { hex: '#ffb84c' },
+      { hex: '#ff9900' }
+    ];
+
+    // Combinações prontas (usam apenas cores da paleta; branco só como neutro de contraste)
+    const COMBOS = {
+      padrao:  { root: { bg: '#660099', text: '#ffffff' }, node: { bg: '#ffffff', text: '#380054', branch: '#eb3c7d' } },
+      roxo:    { root: { bg: '#380054', text: '#ffffff' }, node: { bg: '#660099', text: '#ffffff', branch: '#eb3c7d' } },
+      rosa:    { root: { bg: '#eb3c7d', text: '#ffffff' }, node: { bg: '#ff96b2', text: '#380054', branch: '#cc3d70' } },
+      verde:   { root: { bg: '#660099', text: '#ffffff' }, node: { bg: '#b2d682', text: '#380054', branch: '#82d400' } },
+      laranja: { root: { bg: '#660099', text: '#ffffff' }, node: { bg: '#ffb84c', text: '#380054', branch: '#ff9900' } }
+    };
+
+    const DEFAULT_APPEARANCE = { bgColor: '#ffffff', textColor: DEFAULT_TEXT, branchColor: SECONDARY_COLOR };
+
+    // Initial Diagram Schema
+    const INITIAL_MIND_MAP = {
+      id: 'root',
+      text: 'Mapa Mental Principal',
+      x: 5000,
+      y: 5000,
+      bgColor: BASE_COLOR,
+      textColor: '#ffffff',
+      shape: 'pill',
+      emoji: '🚀',
+      branchColor: SECONDARY_COLOR,
+      appearance: { ...DEFAULT_APPEARANCE },
+      children: [
+        {
+          id: 'node-1',
+          text: 'Ideias & Projetos',
+          bgColor: '#ffffff',
+          textColor: DEFAULT_TEXT,
+          shape: 'rounded',
+          emoji: '💡',
+          branchColor: SECONDARY_COLOR,
+          children: [
+            { id: 'node-1-1', text: 'Novo Website', bgColor: '#ffffff', textColor: DEFAULT_TEXT, shape: 'rounded', emoji: '🌐', branchColor: SECONDARY_COLOR },
+            { id: 'node-1-2', text: 'Aplicativo Mobile', bgColor: '#ffffff', textColor: DEFAULT_TEXT, shape: 'rounded', emoji: '📱', branchColor: SECONDARY_COLOR }
+          ]
+        },
+        {
+          id: 'node-2',
+          text: 'Metas Principais',
+          bgColor: '#ffffff',
+          textColor: DEFAULT_TEXT,
+          shape: 'rounded',
+          emoji: '🎯',
+          branchColor: SECONDARY_COLOR,
+          children: [
+            { id: 'node-2-1', text: 'Aumentar Produtividade', bgColor: '#ffffff', textColor: DEFAULT_TEXT, shape: 'rounded', emoji: '⚡', branchColor: SECONDARY_COLOR },
+            { id: 'node-2-2', text: 'Organizar Rotina', bgColor: '#ffffff', textColor: DEFAULT_TEXT, shape: 'rounded', emoji: '📅', branchColor: SECONDARY_COLOR }
+          ]
+        }
+      ]
+    };
+
+    function loadSavedMap() {
+      try {
+        const raw = storageGet(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.id && parsed.text) return parsed;
+        }
+      } catch (e) { /* dados corrompidos: usa o mapa inicial */ }
+      return JSON.parse(JSON.stringify(INITIAL_MIND_MAP));
+    }
+
+    // State Variables
+    let mindMapData = loadSavedMap();
+    let selectedNodeId = 'root';
+    let isEditingText = false;
+    let layoutOrientation = 'horizontal'; // 'horizontal' ou 'vertical'
+    let lineStyle = 'curved';       // vale para todas as linhas
+    let nodeShape = 'rounded';      // vale para todos os nós
+    let appearance = { ...DEFAULT_APPEARANCE };   // fundo, texto e ramo globais
+
+    // Viewport Pan & Zoom
+    let zoomScale = 1.0;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let startPanX = 0;
+    let startPanY = 0;
+
+    // Drag and Drop
+    let draggedNodeId = null;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    let dragStartClientX = 0;
+    let dragStartClientY = 0;
+    let dragStarted = false;
+    let potentialParentId = null;
+
+    // Layout Engine Dimensions
+    const NODE_APPROX_HEIGHT = 48;   // usado só se a medição falhar
+    const NODE_APPROX_WIDTH = 150;
+    const LEVEL_GAP = 80;            // espaço horizontal entre pai e filhos
+    const VERTICAL_SPACING = 24;
+    const LEVEL_GAP_V = 70;          // espaço vertical entre níveis (visão vertical)
+    const SIBLING_GAP_H = 28;        // espaço horizontal entre irmãos (visão vertical)
+
+    // DOM Elements Cache
+    const viewport = document.getElementById('viewport');
+    const canvasContainer = document.getElementById('canvas-container');
+    const svgCanvas = document.getElementById('svg-canvas');
+    const nodesContainer = document.getElementById('nodes-container');
+    const zoomLevelText = document.getElementById('zoom-level-text');
+
+    // Startup Initialization
+    window.addEventListener('load', () => {
+      initTheme();
+      setupScrollLock();
+      syncGlobalSettings();
+      recalculateTreeLayout();
+      renderMindMap();
+      centerOnNode('root');
+      setupEventListeners();
+
+      // Quando a fonte Inter terminar de carregar, as larguras mudam: recalcula
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+          relayoutKeepingView('root');
+          renderMindMap();
+        });
+      }
+    });
+
+    function initTheme() {
+      const saved = storageGet('mindmap_theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (saved === null && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+
+    /**
+     * Lê do mapa as configurações globais (estilo das linhas, formato dos nós, paleta).
+     * Elas ficam salvas dentro do próprio mapa (e do arquivo .json).
+     */
+    function syncGlobalSettings() {
+      lineStyle = mindMapData.lineStyle || 'curved';
+      nodeShape = mindMapData.nodeShape
+        || (mindMapData.children && mindMapData.children[0] && mindMapData.children[0].shape)
+        || 'rounded';
+      appearance = Object.assign({}, DEFAULT_APPEARANCE, mindMapData.appearance || {});
+      layoutOrientation = mindMapData.orientation === 'vertical' ? 'vertical' : 'horizontal';
+      updateOrientationButton();
+      updateLineStyleButtons();
+    }
+
+    /**
+     * Impede que o navegador "role" a tela sozinho (ex.: ao focar um nó
+     * para edição). O canvas é movido apenas via transform (pan/zoom).
+     */
+    function setupScrollLock() {
+      const lockedEls = [viewport, viewport.parentElement, document.body, document.documentElement];
+      document.addEventListener('scroll', (e) => {
+        const t = (e.target === document) ? document.documentElement : e.target;
+        if (lockedEls.includes(t)) {
+          t.scrollTop = 0;
+          t.scrollLeft = 0;
+        }
+        if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
+      }, true);
+    }
+
+    function autoSave() {
+      storageSet(STORAGE_KEY, JSON.stringify(mindMapData, jsonReplacer));
+    }
+
+    function generateId() {
+      return 'node-' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function forEachNode(fn, node = mindMapData, parent = null) {
+      fn(node, parent);
+      if (node.children) node.children.forEach(c => forEachNode(fn, c, node));
+    }
+
+    // Filhos visíveis: um nó minimizado esconde todos os seus descendentes
+    function visibleChildren(node) {
+      return (node.collapsed && node.children) ? [] : (node.children || []);
+    }
+
+    function forEachVisibleNode(fn, node = mindMapData, parent = null) {
+      fn(node, parent);
+      visibleChildren(node).forEach(c => forEachVisibleNode(fn, c, node));
+    }
+
+    function countDescendants(node) {
+      let total = 0;
+      (node.children || []).forEach(c => { total += 1 + countDescendants(c); });
+      return total;
+    }
+
+    function findNodeAndParent(id, current = mindMapData, parent = null) {
+      if (current.id === id) return { node: current, parent };
+      if (current.children) {
+        for (let child of current.children) {
+          const res = findNodeAndParent(id, child, current);
+          if (res) return res;
+        }
+      }
+      return null;
+    }
+
+    // Retorna o nó selecionado; se nada estiver selecionado, usa a raiz
+    function getActiveMatch() {
+      let match = selectedNodeId ? findNodeAndParent(selectedNodeId) : null;
+      if (!match) {
+        selectedNodeId = mindMapData.id;
+        match = findNodeAndParent(selectedNodeId);
+      }
+      return match;
+    }
+
+    function isDescendant(ancestorId, possibleDescendantId) {
+      const m = findNodeAndParent(ancestorId);
+      if (!m) return false;
+      return !!findNodeAndParent(possibleDescendantId, m.node);
+    }
+
+    // Seleciona um nó sem recriar o DOM (mantém o duplo clique funcionando)
+    function selectNode(id) {
+      selectedNodeId = id;
+      document.querySelectorAll('.mindmap-node.selected').forEach(el => el.classList.remove('selected'));
+      if (id) {
+        const el = document.getElementById(`dom-${id}`);
+        if (el) el.classList.add('selected');
+      }
+      updateInspectorPanel();
+    }
+
+    // Novos nós já nascem com a aparência global (fundo, texto, ramo e formato)
+    function createDefaultNode() {
+      return {
+        id: generateId(),
+        text: 'Novo Tópico',
+        bgColor: appearance.bgColor,
+        textColor: appearance.textColor,
+        shape: nodeShape,
+        branchColor: appearance.branchColor
+      };
+    }
+
+    // ---------- Medição do tamanho real dos nós ----------
+    function measureTree() {
+      const holder = document.getElementById('measure-container');
+      if (!holder) return;
+      holder.innerHTML = '';
+
+      const entries = [];
+      (function collect(n) {
+        const el = createNodeElement(n, true);
+        el.style.left = '0px';
+        el.style.top = '0px';
+        holder.appendChild(el);
+        entries.push([n, el]);
+        visibleChildren(n).forEach(collect);
+      })(mindMapData);
+
+      entries.forEach(([n, el]) => {
+        n._w = el.offsetWidth || NODE_APPROX_WIDTH;
+        n._h = el.offsetHeight || NODE_APPROX_HEIGHT;
+      });
+
+      holder.innerHTML = '';
+    }
+
+    // ---------- Layout (usa largura e altura reais de cada nó) ----------
+    function calculateSubtreeHeight(node) {
+      const h = node._h || NODE_APPROX_HEIGHT;
+      const kids = visibleChildren(node);
+      if (kids.length === 0) {
+        node._subtreeHeight = h + VERTICAL_SPACING;
+        return node._subtreeHeight;
+      }
+
+      let totalHeight = 0;
+      kids.forEach(child => {
+        totalHeight += calculateSubtreeHeight(child);
+      });
+
+      node._subtreeHeight = Math.max(h + VERTICAL_SPACING, totalHeight);
+      return node._subtreeHeight;
+    }
+
+    function positionSubtree(node, x, startY) {
+      const h = node._h || NODE_APPROX_HEIGHT;
+      const w = node._w || NODE_APPROX_WIDTH;
+      node.x = x;
+
+      const kids = visibleChildren(node);
+      if (kids.length === 0) {
+        node.y = startY + (node._subtreeHeight - h) / 2;
+        return;
+      }
+
+      // Os filhos começam depois da borda direita real deste nó
+      const childX = x + w + LEVEL_GAP;
+      let runningY = startY;
+      kids.forEach(child => {
+        positionSubtree(child, childX, runningY);
+        runningY += child._subtreeHeight;
+      });
+
+      const first = kids[0];
+      const last = kids[kids.length - 1];
+      const firstCenter = first.y + (first._h || NODE_APPROX_HEIGHT) / 2;
+      const lastCenter = last.y + (last._h || NODE_APPROX_HEIGHT) / 2;
+      node.y = (firstCenter + lastCenter) / 2 - h / 2;
+    }
+
+    // ----- Layout vertical (organograma de cima para baixo) -----
+    function calculateSubtreeWidth(node) {
+      const w = node._w || NODE_APPROX_WIDTH;
+      const kids = visibleChildren(node);
+      if (kids.length === 0) {
+        node._subtreeWidth = w + SIBLING_GAP_H;
+        return node._subtreeWidth;
+      }
+
+      let total = 0;
+      kids.forEach(child => {
+        total += calculateSubtreeWidth(child);
+      });
+
+      node._subtreeWidth = Math.max(w + SIBLING_GAP_H, total);
+      return node._subtreeWidth;
+    }
+
+    // Posição Y de cada nível (todos os nós de um mesmo nível ficam alinhados)
+    function computeLevelYs() {
+      const heights = [];
+      (function walk(n, d) {
+        heights[d] = Math.max(heights[d] || 0, n._h || NODE_APPROX_HEIGHT);
+        visibleChildren(n).forEach(c => walk(c, d + 1));
+      })(mindMapData, 0);
+
+      const ys = [0];
+      for (let d = 1; d < heights.length; d++) {
+        ys[d] = ys[d - 1] + heights[d - 1] + LEVEL_GAP_V;
+      }
+      return ys;
+    }
+
+    function positionSubtreeVertical(node, startX, depth, levelYs) {
+      const w = node._w || NODE_APPROX_WIDTH;
+      node.y = levelYs[depth];
+
+      const kids = visibleChildren(node);
+      if (kids.length === 0) {
+        node.x = startX + (node._subtreeWidth - w) / 2;
+        return;
+      }
+
+      let runningX = startX;
+      kids.forEach(child => {
+        positionSubtreeVertical(child, runningX, depth + 1, levelYs);
+        runningX += child._subtreeWidth;
+      });
+
+      const first = kids[0];
+      const last = kids[kids.length - 1];
+      const firstCenter = first.x + (first._w || NODE_APPROX_WIDTH) / 2;
+      const lastCenter = last.x + (last._w || NODE_APPROX_WIDTH) / 2;
+      node.x = (firstCenter + lastCenter) / 2 - w / 2;
+    }
+
+    const ROOT_ANCHOR_X = 5000;
+    const ROOT_ANCHOR_Y = 5000;
+
+    function shiftSubtree(node, dx, dy) {
+      node.x += dx;
+      node.y += dy;
+      if (node.children) node.children.forEach(c => shiftSubtree(c, dx, dy));
+    }
+
+    function recalculateTreeLayout() {
+      measureTree();
+
+      if (layoutOrientation === 'vertical') {
+        calculateSubtreeWidth(mindMapData);
+        positionSubtreeVertical(mindMapData, 0, 0, computeLevelYs());
+      } else {
+        calculateSubtreeHeight(mindMapData);
+        const startY = ROOT_ANCHOR_Y - (mindMapData._subtreeHeight / 2);
+        positionSubtree(mindMapData, ROOT_ANCHOR_X, startY);
+      }
+
+      // Mantém o nó central sempre no mesmo ponto do canvas (evita "deriva" a cada edição)
+      shiftSubtree(mindMapData, ROOT_ANCHOR_X - mindMapData.x, ROOT_ANCHOR_Y - mindMapData.y);
+    }
+
+    // Recalcula o layout e compensa o pan para que o nó de referência
+    // continue exatamente no mesmo lugar da tela (o mapa não "pula").
+    function relayoutKeepingView(refId) {
+      const before = findNodeAndParent(refId);
+      const oldX = before ? before.node.x : 0;
+      const oldY = before ? before.node.y : 0;
+
+      recalculateTreeLayout();
+
+      const after = before ? findNodeAndParent(refId) : null;
+      if (after) {
+        panX -= (after.node.x - oldX) * zoomScale;
+        panY -= (after.node.y - oldY) * zoomScale;
+        updateTransform();
+      }
+    }
+
+    // Reposiciona os nós já existentes na tela (sem recriar o DOM) e redesenha as linhas.
+    // Usado durante a digitação, para o mapa abrir espaço enquanto o texto cresce.
+    function refreshPositions(refId) {
+      relayoutKeepingView(refId);
+      forEachNode((n) => {
+        const el = document.getElementById(`dom-${n.id}`);
+        if (el) {
+          el.style.left = `${n.x}px`;
+          el.style.top = `${n.y}px`;
+        }
+      });
+      svgCanvas.innerHTML = '';
+      drawAllConnections(mindMapData);
+    }
+
+    function drawAllConnections(node) {
+      visibleChildren(node).forEach(child => {
+        drawConnection(node, child);
+        drawAllConnections(child);
+      });
+    }
+
+    // Viewport Matrix Transformation
+    function updateTransform() {
+      canvasContainer.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+      zoomLevelText.innerText = `${Math.round(zoomScale * 100)}%`;
+    }
+
+    function centerOnNode(nodeId) {
+      const match = findNodeAndParent(nodeId);
+      if (!match) return;
+      const node = match.node;
+
+      const viewportWidth = viewport.clientWidth;
+      const viewportHeight = viewport.clientHeight;
+
+      if (layoutOrientation === 'vertical' && nodeId === mindMapData.id) {
+        // Visão vertical: raiz centralizada na horizontal e perto do topo
+        const w = node._w || NODE_APPROX_WIDTH;
+        panX = (viewportWidth / 2) - ((node.x + w / 2) * zoomScale);
+        panY = (viewportHeight * 0.18) - (node.y * zoomScale);
+      } else {
+        panX = (viewportWidth / 2) - (node.x * zoomScale);
+        panY = (viewportHeight / 2) - (node.y * zoomScale);
+      }
+
+      updateTransform();
+    }
+
+    // Converte coordenadas da tela para coordenadas do canvas (considera pan e zoom)
+    function clientToWorld(clientX, clientY) {
+      const rect = viewport.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - panX) / zoomScale,
+        y: (clientY - rect.top - panY) / zoomScale
+      };
+    }
+
+    // ---------- Formatos e conexões ----------
+    function getNodeShapeClass(shape) {
+      switch (shape) {
+        case 'pill': return 'rounded-full';
+        case 'rectangle': return 'rounded-none';
+        case 'underline': return 'rounded-none';
+        case 'rounded':
+        default: return 'rounded-xl';
+      }
+    }
+
+    function drawConnection(parentNode, childNode) {
+      const pEl = document.getElementById(`dom-${parentNode.id}`);
+      const cEl = document.getElementById(`dom-${childNode.id}`);
+      if (!pEl || !cEl) return;
+
+      let x1, y1, x2, y2, d;
+      if (layoutOrientation === 'vertical') {
+        // de baixo (centro) do pai até o topo (centro) do filho
+        x1 = parentNode.x + pEl.offsetWidth / 2;
+        y1 = parentNode.y + pEl.offsetHeight;
+        x2 = childNode.x + cEl.offsetWidth / 2;
+        y2 = childNode.y;
+        const my = (y1 + y2) / 2;
+
+        if (lineStyle === 'straight') {
+          d = `M ${x1} ${y1} L ${x2} ${y2}`;
+        } else if (lineStyle === 'orthogonal') {
+          d = `M ${x1} ${y1} V ${my} H ${x2} V ${y2}`;
+        } else {
+          d = `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
+        }
+      } else {
+        // da direita (meio) do pai até a esquerda (meio) do filho
+        x1 = parentNode.x + pEl.offsetWidth;
+        y1 = parentNode.y + pEl.offsetHeight / 2;
+        x2 = childNode.x;
+        y2 = childNode.y + cEl.offsetHeight / 2;
+        const mx = (x1 + x2) / 2;
+
+        if (lineStyle === 'straight') {
+          d = `M ${x1} ${y1} L ${x2} ${y2}`;
+        } else if (lineStyle === 'orthogonal') {
+          d = `M ${x1} ${y1} H ${mx} V ${y2} H ${x2}`;
+        } else {
+          d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+        }
+      }
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', childNode.branchColor || parentNode.branchColor || BASE_COLOR);
+      path.setAttribute('stroke-width', '3');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      svgCanvas.appendChild(path);
+    }
+
+    // Cria o elemento visual de um nó (usado na tela e na medição)
+    function createNodeElement(node, forMeasure) {
+      const el = document.createElement('div');
+      if (!forMeasure) el.id = `dom-${node.id}`;
+      el.className = `mindmap-node ${getNodeShapeClass(node.shape)}`;
+      el.style.left = `${node.x}px`;
+      el.style.top = `${node.y}px`;
+      el.style.backgroundColor = node.bgColor || '#ffffff';
+      el.style.color = node.textColor || DEFAULT_TEXT;
+      el.style.borderColor = node.branchColor || '#cbd5e1';
+
+      if (node.shape === 'underline') {
+        el.style.backgroundColor = 'transparent';
+        el.style.boxShadow = 'none';
+        el.style.borderWidth = '0 0 3px 0';
+      }
+      if (node.shape === 'pill') {
+        el.style.paddingLeft = '20px';
+        el.style.paddingRight = '20px';
+      }
+
+      let html = '';
+      if (node.emoji) {
+        html += `<span class="node-emoji">${node.emoji}</span>`;
+      }
+      html += `<span class="node-text">${escapeHtml(node.text)}</span>`;
+      el.innerHTML = html;
+
+      // Botão (−) minimizar / (+N) expandir, só em nós que têm filhos
+      if (!forMeasure && node.children && node.children.length > 0) {
+        const collapsed = !!node.collapsed;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'collapse-btn' + (collapsed ? ' is-collapsed' : '');
+        if (layoutOrientation === 'vertical') btn.classList.add('vertical');
+        btn.style.color = node.branchColor || BASE_COLOR;
+        btn.textContent = collapsed ? `+${countDescendants(node)}` : '\u2212';
+        btn.title = collapsed ? 'Expandir ramo' : 'Minimizar ramo';
+        btn.addEventListener('mousedown', (e) => e.stopPropagation());
+        btn.addEventListener('dblclick', (e) => { e.stopPropagation(); e.preventDefault(); });
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleCollapse(node.id);
+        });
+        el.appendChild(btn);
+      }
+
+      return el;
+    }
+
+    // Main Mind Map Renderer
+    function renderMindMap() {
+      nodesContainer.innerHTML = '';
+      svgCanvas.innerHTML = '';
+
+      renderNodeRecursive(mindMapData, null);
+      updateInspectorPanel();
+      autoSave();
+    }
+
+    function renderNodeRecursive(node, parentNode) {
+      const el = createNodeElement(node, false);
+
+      if (selectedNodeId === node.id) el.classList.add('selected');
+      if (potentialParentId === node.id) el.classList.add('drop-target');
+
+      // Seleção / arraste
+      el.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (isEditingText) return; // permite clicar dentro do texto em edição
+        onNodeMouseDown(e, node.id);
+      });
+
+      // Duplo clique = editar texto
+      el.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        makeNodeEditable(node.id);
+      });
+
+      nodesContainer.appendChild(el);
+
+      // Linha até o pai
+      if (parentNode) {
+        drawConnection(parentNode, node);
+      }
+
+      // Filhos
+      visibleChildren(node).forEach(child => renderNodeRecursive(child, node));
+    }
+
+    // Inline Node Text Editing Logic
+    function makeNodeEditable(nodeId) {
+      const match = findNodeAndParent(nodeId);
+      if (!match) return;
+      const node = match.node;
+
+      const nodeDom = document.getElementById(`dom-${nodeId}`);
+      if (!nodeDom) return;
+      const textSpan = nodeDom.querySelector('.node-text');
+      if (!textSpan) return;
+
+      const originalText = node.text;
+      const snapBefore = makeSnapshot();
+
+      isEditingText = true;
+      textSpan.contentEditable = 'true';
+      textSpan.classList.add('editing');
+
+      // Foca sem rolar a página
+      textSpan.focus({ preventScroll: true });
+
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(textSpan);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (err) {
+        // Fallback selection
+      }
+
+      let saved = false;
+      const commitChange = () => {
+        if (saved) return;
+        saved = true;
+        isEditingText = false;
+        textSpan.contentEditable = 'false';
+        textSpan.classList.remove('editing');
+
+        const newText = textSpan.innerText.replace(/\s+/g, ' ').trim();
+        node.text = newText || originalText;
+        if (node.text !== originalText) {
+          lastUndoKey = null;
+          pushSnapshot(snapBefore);
+        }
+
+        relayoutKeepingView(node.id);
+        renderMindMap();
+      };
+
+      // Enquanto digita, o mapa abre espaço (filhos e vizinhos se afastam)
+      textSpan.addEventListener('input', () => {
+        node.text = textSpan.innerText.replace(/\s+/g, ' ');
+        refreshPositions(node.id);
+      });
+
+      textSpan.addEventListener('blur', commitChange, { once: true });
+
+      textSpan.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+          textSpan.blur(); // dispara o blur, salva o texto e sai do modo de edição
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          node.text = originalText;
+          textSpan.innerText = originalText;
+          textSpan.blur();
+        }
+      });
+    }
+
+    // Node Operations
+    function addChildNode() {
+      const match = getActiveMatch();
+      if (!match) return;
+      pushUndo();
+      const parent = match.node;
+
+      if (!parent.children) parent.children = [];
+      parent.collapsed = false; // adicionar um filho expande o ramo
+
+      const newChild = createDefaultNode();
+      const newId = newChild.id;
+
+      parent.children.push(newChild);
+      selectedNodeId = newId;
+
+      relayoutKeepingView(parent.id);
+      renderMindMap();
+      setTimeout(() => makeNodeEditable(newId), 50);
+    }
+
+    function addSiblingNode() {
+      const active = getActiveMatch();
+      if (!active) return;
+
+      if (active.node.id === mindMapData.id || !active.parent) {
+        addChildNode();
+        return;
+      }
+
+      pushUndo();
+      const parent = active.parent;
+      const newSibling = createDefaultNode();
+      const newId = newSibling.id;
+
+      const idx = parent.children.findIndex(c => c.id === active.node.id);
+      if (idx !== -1) {
+        parent.children.splice(idx + 1, 0, newSibling);
+      } else {
+        parent.children.push(newSibling);
+      }
+
+      const refId = active.node.id;
+      selectedNodeId = newId;
+
+      relayoutKeepingView(refId);
+      renderMindMap();
+      setTimeout(() => makeNodeEditable(newId), 50);
+    }
+
+    function deleteSelectedNode() {
+      const match = getActiveMatch();
+      if (!match) return;
+
+      if (!match.parent) {
+        alert('O nó central não pode ser excluído.');
+        return;
+      }
+
+      pushUndo(); // permite recuperar com Ctrl+Z
+      const parent = match.parent;
+      const idx = parent.children.findIndex(c => c.id === match.node.id);
+      parent.children.splice(idx, 1);
+
+      // Seleciona o irmão anterior; se não houver, o próximo; se não houver irmãos, o pai
+      if (parent.children.length === 0) {
+        selectedNodeId = parent.id;
+      } else if (idx > 0) {
+        selectedNodeId = parent.children[idx - 1].id;
+      } else {
+        selectedNodeId = parent.children[0].id;
+      }
+
+      relayoutKeepingView(selectedNodeId);
+      renderMindMap();
+    }
+
+    // Minimiza ou expande o ramo de um nó (o nó fica parado na tela)
+    function toggleCollapse(nodeId, forceState) {
+      const match = findNodeAndParent(nodeId);
+      if (!match) return;
+      const node = match.node;
+      if (!node.children || node.children.length === 0) return;
+
+      pushUndo();
+      node.collapsed = (typeof forceState === 'boolean') ? forceState : !node.collapsed;
+
+      // Se o nó selecionado ficou escondido, seleciona o nó minimizado
+      if (node.collapsed && selectedNodeId && selectedNodeId !== node.id && isDescendant(node.id, selectedNodeId)) {
+        selectedNodeId = node.id;
+      }
+
+      relayoutKeepingView(node.id);
+      renderMindMap();
+    }
+
+    // ---------- Desfazer / Refazer (Ctrl+Z / Ctrl+Y) ----------
+    const MAX_UNDO = 100;
+    let undoStack = [];
+    let redoStack = [];
+    let lastUndoKey = null;
+    let lastUndoTime = 0;
+
+    function makeSnapshot() {
+      return { data: JSON.stringify(mindMapData, jsonReplacer), selected: selectedNodeId };
+    }
+
+    function pushSnapshot(snap) {
+      undoStack.push(snap);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      redoStack = [];
+      updateUndoButtons();
+    }
+
+    // Guarda o estado ANTES de uma alteração. Com "key", alterações seguidas da mesma
+    // coisa (ex.: arrastar o seletor de cor) viram um único passo de desfazer.
+    function pushUndo(key) {
+      const now = Date.now();
+      if (key && key === lastUndoKey && now - lastUndoTime < 1200) {
+        lastUndoTime = now;
+        return;
+      }
+      lastUndoKey = key || null;
+      lastUndoTime = now;
+      pushSnapshot(makeSnapshot());
+    }
+
+    function restoreSnapshot(snap) {
+      const parsed = JSON.parse(snap.data);
+      parsed.orientation = layoutOrientation; // a visão (horizontal/vertical) não entra no desfazer
+
+      // Guarda a posição atual do nó de referência para a tela não "pular"
+      const refId = snap.selected;
+      const cur = refId ? findNodeAndParent(refId) : null;
+      const oldX = cur ? cur.node.x : 0;
+      const oldY = cur ? cur.node.y : 0;
+
+      mindMapData = parsed;
+      syncGlobalSettings();
+      selectedNodeId = (refId && findNodeAndParent(refId)) ? refId : mindMapData.id;
+
+      recalculateTreeLayout();
+
+      const after = cur ? findNodeAndParent(refId) : null;
+      if (after) {
+        panX -= (after.node.x - oldX) * zoomScale;
+        panY -= (after.node.y - oldY) * zoomScale;
+        updateTransform();
+      }
+
+      renderMindMap();
+    }
+
+    function undo() {
+      if (isEditingText || undoStack.length === 0) return;
+      const snap = undoStack.pop();
+      redoStack.push(makeSnapshot());
+      lastUndoKey = null;
+      restoreSnapshot(snap);
+      updateUndoButtons();
+    }
+
+    function redo() {
+      if (isEditingText || redoStack.length === 0) return;
+      const snap = redoStack.pop();
+      undoStack.push(makeSnapshot());
+      lastUndoKey = null;
+      restoreSnapshot(snap);
+      updateUndoButtons();
+    }
+
+    function updateUndoButtons() {
+      const u = document.getElementById('btn-undo');
+      const r = document.getElementById('btn-redo');
+      if (u) u.disabled = undoStack.length === 0;
+      if (r) r.disabled = redoStack.length === 0;
+    }
+
+    // ---------- Orientação: horizontal <-> vertical ----------
+    function updateOrientationButton() {
+      const btn = document.getElementById('btn-orientation-toggle');
+      const icon = document.getElementById('orientation-icon');
+      if (!btn || !icon) return;
+      const vertical = layoutOrientation === 'vertical';
+      icon.className = 'fa-solid fa-sitemap' + (vertical ? '' : ' fa-rotate-270');
+      btn.title = vertical
+        ? 'Visão vertical (clique para horizontal)'
+        : 'Visão horizontal (clique para vertical)';
+    }
+
+    function toggleOrientation() {
+      layoutOrientation = (layoutOrientation === 'vertical') ? 'horizontal' : 'vertical';
+      mindMapData.orientation = layoutOrientation;
+      updateOrientationButton();
+      recalculateTreeLayout();
+      renderMindMap();
+      centerOnNode(mindMapData.id);
+    }
+
+    // Event Listeners Setup
+    function setupEventListeners() {
+      // Pan Canvas strictly from viewport background clicks
+      viewport.addEventListener('mousedown', (e) => {
+        if (e.target === viewport || e.target === svgCanvas || e.target.id === 'canvas-container') {
+          isPanning = true;
+          startPanX = e.clientX - panX;
+          startPanY = e.clientY - panY;
+          selectNode(null);
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (isPanning) {
+          panX = e.clientX - startPanX;
+          panY = e.clientY - startPanY;
+          updateTransform();
+        } else if (draggedNodeId) {
+          onNodeDrag(e);
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isPanning) isPanning = false;
+        if (draggedNodeId) onNodeDragEnd();
+      });
+
+      // Zoom Canvas
+      viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.08 : 0.92;
+        const newScale = Math.min(Math.max(0.3, zoomScale * factor), 2.5);
+
+        const rect = viewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        panX = mouseX - (mouseX - panX) * (newScale / zoomScale);
+        panY = mouseY - (mouseY - panY) * (newScale / zoomScale);
+        zoomScale = newScale;
+
+        updateTransform();
+      }, { passive: false });
+
+      // Buttons
+      document.getElementById('btn-zoom-in').onclick = () => { zoomScale = Math.min(2.5, zoomScale * 1.15); updateTransform(); };
+      document.getElementById('btn-zoom-out').onclick = () => { zoomScale = Math.max(0.3, zoomScale / 1.15); updateTransform(); };
+      document.getElementById('btn-fit-screen').onclick = () => centerOnNode('root');
+      document.getElementById('btn-add-child').onclick = addChildNode;
+      document.getElementById('btn-add-sibling').onclick = addSiblingNode;
+      document.getElementById('btn-delete-node').onclick = deleteSelectedNode;
+      document.getElementById('btn-layout-auto').onclick = () => { recalculateTreeLayout(); renderMindMap(); centerOnNode('root'); };
+
+      // Alternar tema claro/escuro
+      document.getElementById('btn-theme-toggle').onclick = () => {
+        const isDark = document.documentElement.classList.toggle('dark');
+        storageSet('mindmap_theme', isDark ? 'dark' : 'light');
+      };
+
+      // Desfazer / Refazer
+      document.getElementById('btn-undo').onclick = undo;
+      document.getElementById('btn-redo').onclick = redo;
+      updateUndoButtons();
+
+      // Alternar visão horizontal / vertical
+      document.getElementById('btn-orientation-toggle').onclick = toggleOrientation;
+
+      // Header Map Title Double Click Rename
+      const headerTitle = document.getElementById('map-title-display');
+      headerTitle.ondblclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        selectedNodeId = 'root';
+        renderMindMap();
+        makeNodeEditable('root');
+      };
+
+      // Global Keydown Handler
+      window.addEventListener('keydown', (e) => {
+        if (isEditingText || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.isContentEditable) {
+          return;
+        }
+
+        // Desfazer / Refazer
+        if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+          const k = e.key.toLowerCase();
+          if (k === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            undo();
+            return;
+          }
+          if (k === 'y' || (k === 'z' && e.shiftKey)) {
+            e.preventDefault();
+            redo();
+            return;
+          }
+        }
+
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          addChildNode();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          addSiblingNode();
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          deleteSelectedNode();
+        } else if (e.key === ' ' || e.code === 'Space') {
+          e.preventDefault();
+          if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+          const m = getActiveMatch();
+          if (m) toggleCollapse(m.node.id);
+        } else if (e.key === 'F2') {
+          e.preventDefault();
+          const m = getActiveMatch();
+          if (m) makeNodeEditable(m.node.id);
+        }
+      });
+
+      // Files Operations
+      document.getElementById('btn-save-json').onclick = saveJsonFile;
+      document.getElementById('btn-open-file').onclick = () => document.getElementById('file-input').click();
+      document.getElementById('file-input').onchange = loadJsonFile;
+      document.getElementById('btn-new-map').onclick = createNewMap;
+      document.getElementById('btn-export-png').onclick = exportAsPNG;
+
+      setupInspectorControls();
+    }
+
+    // Drag Node Reparenting
+    function onNodeMouseDown(e, nodeId) {
+      if (e.button !== 0) return;
+
+      selectNode(nodeId); // não recria o DOM, para o duplo clique funcionar
+
+      // O nó central não é arrastável
+      if (nodeId === mindMapData.id) return;
+
+      const match = findNodeAndParent(nodeId);
+      if (!match) return;
+
+      const world = clientToWorld(e.clientX, e.clientY);
+      dragOffsetX = world.x - match.node.x;
+      dragOffsetY = world.y - match.node.y;
+      dragStartClientX = e.clientX;
+      dragStartClientY = e.clientY;
+      dragStarted = false;
+      draggedNodeId = nodeId;
+    }
+
+    function onNodeDrag(e) {
+      if (!draggedNodeId) return;
+
+      // Só começa a arrastar depois de mover alguns pixels
+      if (!dragStarted) {
+        const dist = Math.hypot(e.clientX - dragStartClientX, e.clientY - dragStartClientY);
+        if (dist < 4) return;
+        dragStarted = true;
+      }
+
+      const match = findNodeAndParent(draggedNodeId);
+      if (!match) return;
+
+      const world = clientToWorld(e.clientX, e.clientY);
+      match.node.x = world.x - dragOffsetX;
+      match.node.y = world.y - dragOffsetY;
+
+      // Descobre sobre qual nó o cursor está (possível novo pai)
+      const elements = document.elementsFromPoint(e.clientX, e.clientY);
+      let targetId = null;
+
+      for (let el of elements) {
+        const nodeEl = el.closest ? el.closest('.mindmap-node') : null;
+        if (nodeEl && nodeEl.id !== `dom-${draggedNodeId}`) {
+          targetId = nodeEl.id.replace('dom-', '');
+          break;
+        }
+      }
+
+      // Não permite soltar em si mesmo nem em um descendente (evita ciclo)
+      if (targetId && (targetId === draggedNodeId || isDescendant(draggedNodeId, targetId))) {
+        targetId = null;
+      }
+      potentialParentId = targetId;
+
+      renderMindMap();
+    }
+
+    function onNodeDragEnd() {
+      const wasDragging = dragStarted;
+      const dropTargetId = potentialParentId;
+
+      if (wasDragging && potentialParentId && draggedNodeId && draggedNodeId !== 'root') {
+        const sourceMatch = findNodeAndParent(draggedNodeId);
+        const targetMatch = findNodeAndParent(potentialParentId);
+
+        if (sourceMatch && targetMatch && sourceMatch.parent) {
+          pushUndo();
+          sourceMatch.parent.children = sourceMatch.parent.children.filter(c => c.id !== draggedNodeId);
+          if (!targetMatch.node.children) targetMatch.node.children = [];
+          targetMatch.node.children.push(sourceMatch.node);
+          targetMatch.node.collapsed = false;
+        }
+      }
+
+      draggedNodeId = null;
+      potentialParentId = null;
+      dragStarted = false;
+
+      // Só recria o DOM se realmente houve arraste (senão o duplo clique quebra)
+      if (wasDragging) {
+        relayoutKeepingView(dropTargetId || mindMapData.id);
+        renderMindMap();
+      }
+    }
+
+    // Aplica um formato a TODOS os nós do mapa
+    function applyShapeToAll(shape) {
+      nodeShape = shape;
+      mindMapData.nodeShape = shape;
+      forEachNode((n) => { n.shape = shape; });
+    }
+
+    // Inspector Control Bindings
+    function setupInspectorControls() {
+      const bgColor = document.getElementById('node-bg-color');
+      const textColor = document.getElementById('node-text-color');
+      const shape = document.getElementById('node-shape-select');
+      const branchColor = document.getElementById('branch-color');
+
+      // Fundo, texto e cor do ramo valem para todos os nós (como o estilo das linhas)
+      bgColor.oninput = (e) => applyAppearanceToAll('bgColor', e.target.value);
+      textColor.oninput = (e) => applyAppearanceToAll('textColor', e.target.value);
+
+      // Formato: vale para todos os nós (como o estilo das linhas)
+      shape.onchange = (e) => {
+        pushUndo();
+        applyShapeToAll(e.target.value);
+        const match = getActiveMatch();
+        relayoutKeepingView(match ? match.node.id : mindMapData.id);
+        renderMindMap();
+      };
+
+      branchColor.oninput = (e) => applyAppearanceToAll('branchColor', e.target.value);
+
+      buildPaletteRows();
+
+      document.querySelectorAll('.emoji-btn').forEach(btn => {
+        btn.onclick = () => {
+          const match = getActiveMatch();
+          if (match) {
+            pushUndo();
+            match.node.emoji = btn.dataset.emoji;
+            relayoutKeepingView(match.node.id); // o emoji muda a largura do nó
+            renderMindMap();
+          }
+        };
+      });
+
+      document.querySelectorAll('.theme-preset').forEach(btn => {
+        btn.onclick = () => applyThemePreset(btn.dataset.theme);
+      });
+
+      document.querySelectorAll('.line-style-btn').forEach(btn => {
+        btn.onclick = () => {
+          pushUndo();
+          lineStyle = btn.dataset.line;
+          mindMapData.lineStyle = lineStyle;
+          updateLineStyleButtons();
+          renderMindMap();
+        };
+      });
+    }
+
+    function updateLineStyleButtons() {
+      const active = ['border-[#660099]', 'bg-[#f5eafa]', 'text-[#660099]', 'dark:bg-[#660099]/25', 'dark:text-[#d9b3ec]'];
+      const inactive = ['border-slate-200', 'dark:border-slate-700', 'hover:bg-slate-50', 'dark:hover:bg-slate-700'];
+      document.querySelectorAll('.line-style-btn').forEach(btn => {
+        const isActive = btn.dataset.line === lineStyle;
+        btn.classList.remove(...active, ...inactive);
+        btn.classList.add(...(isActive ? active : inactive));
+      });
+    }
+
+    function updateInspectorPanel() {
+      document.getElementById('map-title-text').innerText = mindMapData.text || 'Mapa Mental Principal';
+      document.getElementById('node-shape-select').value = nodeShape;
+
+      document.getElementById('node-bg-color').value = appearance.bgColor;
+      document.getElementById('node-bg-val').innerText = appearance.bgColor;
+      document.getElementById('node-text-color').value = appearance.textColor;
+      document.getElementById('node-text-val').innerText = appearance.textColor;
+      document.getElementById('branch-color').value = appearance.branchColor;
+      document.getElementById('branch-color-val').innerText = appearance.branchColor;
+
+      // Destaca a cor da paleta que está em uso
+      document.querySelectorAll('.palette-swatch').forEach(btn => {
+        const current = (appearance[btn.dataset.field] || '').toLowerCase();
+        btn.classList.toggle('active', current === btn.dataset.color.toLowerCase());
+      });
+    }
+
+    // Aplica fundo, texto ou cor do ramo a TODOS os nós
+    function applyAppearanceToAll(field, value) {
+      pushUndo('appearance-' + field);
+      appearance[field] = value;
+      mindMapData.appearance = Object.assign({}, appearance);
+      forEachNode((n) => { n[field] = value; });
+      renderMindMap();
+    }
+
+    // Bolinhas da paleta (principal e secundária maiores) abaixo de cada cor
+    function buildPaletteRows() {
+      document.querySelectorAll('.palette-row').forEach(row => {
+        const field = row.dataset.target;
+        row.innerHTML = '';
+        PALETTE.forEach(c => {
+          const size = c.main ? 24 : 18;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'palette-swatch';
+          btn.dataset.color = c.hex;
+          btn.dataset.field = field;
+          btn.title = c.label ? `${c.label} (${c.hex})` : c.hex;
+          btn.style.background = c.hex;
+          btn.style.width = `${size}px`;
+          btn.style.height = `${size}px`;
+          btn.onclick = () => applyAppearanceToAll(field, c.hex);
+          row.appendChild(btn);
+        });
+      });
+    }
+
+    // Combinações prontas: aplicam fundo, texto e ramo a todos os nós
+    // (o nó central recebe a cor de destaque da combinação)
+    function applyThemePreset(key) {
+      const combo = COMBOS[key];
+      if (!combo) return;
+      pushUndo();
+
+      appearance = { bgColor: combo.node.bg, textColor: combo.node.text, branchColor: combo.node.branch };
+      mindMapData.appearance = Object.assign({}, appearance);
+
+      forEachNode((n, parent) => {
+        if (!parent) {
+          n.bgColor = combo.root.bg;
+          n.textColor = combo.root.text;
+        } else {
+          n.bgColor = combo.node.bg;
+          n.textColor = combo.node.text;
+        }
+        n.branchColor = combo.node.branch;
+      });
+
+      renderMindMap();
+    }
+
+    // ---------- Salvar com escolha de nome e local ----------
+    function safeFileName(name) {
+      return (name || 'mapa-mental').replace(/[\\/:*?"<>|]/g, '-').trim() || 'mapa-mental';
+    }
+
+    // Abre a janela "Salvar como" (nome + local). Se o navegador não suportar,
+    // pergunta o nome e baixa o arquivo normalmente.
+    async function saveFileWithPicker(blob, suggestedName, description, mime, ext) {
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName,
+            types: [{ description, accept: { [mime]: [ext] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // usuário cancelou
+          // outros erros (ex.: ambiente restrito): usa o método alternativo abaixo
+        }
+      }
+
+      const typed = prompt('Nome do arquivo:', suggestedName);
+      if (!typed) return;
+      const finalName = typed.toLowerCase().endsWith(ext) ? typed : typed + ext;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = safeFileName(finalName);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function saveJsonFile() {
+      const blob = new Blob([JSON.stringify(mindMapData, jsonReplacer, 2)], { type: 'application/json' });
+      saveFileWithPicker(blob, `${safeFileName(mindMapData.text)}.json`, 'Mapa Mental (JSON)', 'application/json', '.json');
+    }
+
+    function loadJsonFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const loaded = JSON.parse(e.target.result);
+          if (loaded && loaded.id && loaded.text) {
+            pushUndo();
+            mindMapData = loaded;
+            selectedNodeId = mindMapData.id;
+            syncGlobalSettings();
+            recalculateTreeLayout();
+            renderMindMap();
+            centerOnNode(mindMapData.id);
+          } else {
+            alert('Formato de arquivo inválido.');
+          }
+        } catch (err) {
+          alert('Erro ao carregar o arquivo JSON.');
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = ''; // permite abrir o mesmo arquivo de novo
+    }
+
+    function createNewMap() {
+      if (confirm('Deseja criar um novo mapa mental? Qualquer alteração não salva será substituída.')) {
+        pushUndo();
+        mindMapData = {
+          id: 'root',
+          text: 'Novo Mapa Mental',
+          x: 5000,
+          y: 5000,
+          bgColor: BASE_COLOR,
+          textColor: '#ffffff',
+          shape: 'pill',
+          emoji: '💡',
+          branchColor: SECONDARY_COLOR,
+          appearance: { ...DEFAULT_APPEARANCE },
+          lineStyle: 'curved',
+          orientation: layoutOrientation,
+          nodeShape: 'rounded',
+          children: []
+        };
+        selectedNodeId = 'root';
+        syncGlobalSettings();
+        recalculateTreeLayout();
+        renderMindMap();
+        centerOnNode('root');
+      }
+    }
+
+    // ---------- PNG Image Export ----------
+    function wrapCanvasText(ctx, text, maxWidth) {
+      const words = text.split(' ');
+      const lines = [];
+      let line = '';
+      words.forEach(word => {
+        const test = line ? line + ' ' + word : word;
+        if (ctx.measureText(test).width > maxWidth && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      });
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    function exportAsPNG() {
+      recalculateTreeLayout(); // garante larguras e alturas atualizadas
+
+      const bounds = getMindMapBounds();
+      const padding = 80;
+      const width = bounds.width + (padding * 2);
+      const height = bounds.height + (padding * 2);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      const isDark = document.documentElement.classList.contains('dark');
+      ctx.fillStyle = isDark ? '#0f172a' : '#f8fafc';
+      ctx.fillRect(0, 0, width, height);
+
+      function drawLinesCanvas(node) {
+        visibleChildren(node).forEach(child => {
+          const nw = node._w || NODE_APPROX_WIDTH;
+          const nh = node._h || NODE_APPROX_HEIGHT;
+          const cw = child._w || NODE_APPROX_WIDTH;
+          const ch = child._h || NODE_APPROX_HEIGHT;
+          const vertical = layoutOrientation === 'vertical';
+
+          let x1, y1, x2, y2;
+          if (vertical) {
+            x1 = node.x - bounds.minX + padding + nw / 2;
+            y1 = node.y - bounds.minY + padding + nh;
+            x2 = child.x - bounds.minX + padding + cw / 2;
+            y2 = child.y - bounds.minY + padding;
+          } else {
+            x1 = node.x - bounds.minX + padding + nw;
+            y1 = node.y - bounds.minY + padding + nh / 2;
+            x2 = child.x - bounds.minX + padding;
+            y2 = child.y - bounds.minY + padding + ch / 2;
+          }
+          const mx = (x1 + x2) / 2;
+          const my = (y1 + y2) / 2;
+
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          if (lineStyle === 'straight') {
+            ctx.lineTo(x2, y2);
+          } else if (lineStyle === 'orthogonal') {
+            if (vertical) {
+              ctx.lineTo(x1, my);
+              ctx.lineTo(x2, my);
+              ctx.lineTo(x2, y2);
+            } else {
+              ctx.lineTo(mx, y1);
+              ctx.lineTo(mx, y2);
+              ctx.lineTo(x2, y2);
+            }
+          } else if (vertical) {
+            ctx.bezierCurveTo(x1, my, x2, my, x2, y2);
+          } else {
+            ctx.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+          }
+          ctx.strokeStyle = child.branchColor || BASE_COLOR;
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+
+          drawLinesCanvas(child);
+        });
+      }
+
+      function drawNodesCanvas(node) {
+        const x = node.x - bounds.minX + padding;
+        const y = node.y - bounds.minY + padding;
+        const w = node._w || NODE_APPROX_WIDTH;
+        const h = node._h || NODE_APPROX_HEIGHT;
+
+        if (node.shape === 'underline') {
+          ctx.beginPath();
+          ctx.moveTo(x, y + h - 1.5);
+          ctx.lineTo(x + w, y + h - 1.5);
+          ctx.strokeStyle = node.branchColor || '#cbd5e1';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        } else {
+          const r = node.shape === 'pill' ? h / 2 : (node.shape === 'rectangle' ? 0 : 12);
+          ctx.fillStyle = node.bgColor || '#ffffff';
+          ctx.strokeStyle = node.branchColor || '#cbd5e1';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(x, y, w, h, r);
+          } else {
+            ctx.rect(x, y, w, h);
+          }
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = node.textColor || DEFAULT_TEXT;
+        ctx.font = '500 14px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const label = (node.emoji ? node.emoji + ' ' : '') + node.text;
+        const lines = wrapCanvasText(ctx, label, Math.max(40, w - 32));
+        const lineH = 20;
+        const firstY = y + h / 2 - (lines.length * lineH) / 2 + lineH / 2;
+        lines.forEach((ln, i) => ctx.fillText(ln, x + w / 2, firstY + i * lineH));
+
+        if (node.collapsed && node.children && node.children.length > 0) {
+          const vert = layoutOrientation === 'vertical';
+          const bx = vert ? x + w / 2 : x + w;
+          const by = vert ? y + h : y + h / 2;
+          const bc = node.branchColor || BASE_COLOR;
+          ctx.beginPath();
+          ctx.arc(bx, by, 12, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = bc;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = bc;
+          ctx.font = '700 11px Inter, sans-serif';
+          ctx.fillText('+' + countDescendants(node), bx, by);
+        }
+
+        visibleChildren(node).forEach(drawNodesCanvas);
+      }
+
+      drawLinesCanvas(mindMapData);
+      drawNodesCanvas(mindMapData);
+
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        saveFileWithPicker(blob, `${safeFileName(mindMapData.text)}.png`, 'Imagem PNG', 'image/png', '.png');
+      }, 'image/png');
+    }
+
+    function getMindMapBounds() {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+      forEachVisibleNode((node) => {
+        const w = node._w || NODE_APPROX_WIDTH;
+        const h = node._h || NODE_APPROX_HEIGHT;
+        if (node.x < minX) minX = node.x;
+        if (node.x + w > maxX) maxX = node.x + w;
+        if (node.y < minY) minY = node.y;
+        if (node.y + h > maxY) maxY = node.y + h;
+      });
+
+      return {
+        minX, maxX, minY, maxY,
+        width: Math.max(maxX - minX, 200),
+        height: Math.max(maxY - minY, 100)
+      };
+    }
+  </script>
+</body>
+</html>
